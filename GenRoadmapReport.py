@@ -2,6 +2,8 @@
 import os
 import re
 import pandas as pd
+import platform
+import subprocess
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -9,6 +11,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.shared import OxmlElement
 from docx.oxml.ns import qn
 import docx.opc.constants
+from docx.enum.text import WD_BREAK
+from docx.oxml import OxmlElement
+from docx.enum.section import WD_ORIENTATION
+import win32com.client
+import time
 
 def read_excel_file(file_path):
     """
@@ -101,32 +108,116 @@ def process_data(data):
                     'description': description
                 }
         elif issue_type == '':
-            # This row represents a status aggregator, but we'll ignore it
-            # as we're already using the actual statuses from the initiatives
-            pass
+            if summary == "Not an issue":
+                # If we encounter "Not an issue", we've reached the end of relevant data
+                break
+            else:
+                # This row represents a status aggregator, but we'll ignore it
+                # as we're already using the actual statuses from the initiatives
+                pass
     
     return structured_data
 
-def create_word_document(structured_data, output_file_path):
+def create_word_document(structured_data, output_file_path, include_todo=False):
     doc = Document()
     
+    # Set page orientation to landscape
+    section = doc.sections[0]
+    new_width, new_height = section.page_height, section.page_width
+    section.orientation = WD_ORIENTATION.LANDSCAPE
+    section.page_width = new_width
+    section.page_height = new_height
+    
+    # Update existing heading styles
+    styles = doc.styles
+    
+    # Heading 1 style
+    style_h1 = styles['Heading 1']
+    style_h1.font.size = Pt(22)
+    style_h1.paragraph_format.left_indent = Cm(0)
+    
+    # Heading 2 style
+    style_h2 = styles['Heading 2']
+    style_h2.font.size = Pt(20)
+    style_h2.paragraph_format.left_indent = Cm(1)
+    
+    # Heading 3 style
+    style_h3 = styles['Heading 3']
+    style_h3.font.size = Pt(18)
+    style_h3.paragraph_format.left_indent = Cm(0)
+    
+    # Add title
+    doc.add_heading("Roadmap Status Report", level=0)
+    
+    # Add table of contents
+    doc.add_paragraph("Table of Contents", style='TOC Heading')
+     # Add the table of contents
+    paragraph = doc.add_paragraph()
+    run = paragraph.add_run()
+    fldChar = OxmlElement('w:fldChar')
+    fldChar.set(qn('w:fldCharType'), 'begin')
+    instrText = OxmlElement('w:instrText')
+    instrText.set(qn('xml:space'), 'preserve')
+    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
+    fldChar2 = OxmlElement('w:fldChar')
+    fldChar2.set(qn('w:fldCharType'), 'separate')
+    fldChar3 = OxmlElement('w:t')
+    fldChar3.text = "Right-click to update field."
+    fldChar4 = OxmlElement('w:fldChar')
+    fldChar4.set(qn('w:fldCharType'), 'end')
+
+    r_element = run._r
+    r_element.append(fldChar)
+    r_element.append(instrText)
+    r_element.append(fldChar2)
+    r_element.append(fldChar3)
+    r_element.append(fldChar4)
+    doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+
+    # Define the order of statuses
+    status_order = ['Done', 'In progress', 'Next']
+    if include_todo:
+        status_order.append('To Do')
+
     for theme_key, theme_data in structured_data.items():
-        theme_title = f"Theme: {theme_data['summary']} ({theme_key})"
-        heading = doc.add_heading(theme_title, level=1)
-        add_hyperlink(heading.runs[0], f"https://omnisys.atlassian.net/browse/{theme_key}", theme_title)
+        theme_printed = False
         
         for goal_key, goal_data in theme_data['goals'].items():
-            doc.add_heading(f"Goal: {goal_data['summary']}", level=2)
-            
-            # Define the order of statuses
-            status_order = ['Done', 'In progress', 'Next', 'To Do']
+            goal_printed = False
             
             for status in status_order:
-                if status in goal_data['statuses']:
+                if status in goal_data['statuses'] and goal_data['statuses'][status]:
                     initiatives = goal_data['statuses'][status]
-                    doc.add_paragraph(f"Status: {status}", style='Heading 3')
                     
-                    # Create a table for initiatives of this status
+                    if not theme_printed:
+                        heading = doc.add_heading(level=1)
+                        heading.add_run(f"{theme_data['summary']} (")
+                        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{theme_key}", theme_key)
+                        heading.add_run(")")
+                        
+                        # Add Hebrew summary for theme
+                        hebrew_summary = doc.add_paragraph()
+                        hebrew_summary.add_run(handle_hebrew_text(theme_data['hebrew_summary']))
+                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        
+                        theme_printed = True
+                    
+                    if not goal_printed:
+                        heading = doc.add_heading(level=2)
+                        heading.add_run(f"{goal_data['summary']} (")
+                        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{goal_key}", goal_key)
+                        heading.add_run(")")
+                        
+                        # Add Hebrew summary for goal
+                        hebrew_summary = doc.add_paragraph()
+                        hebrew_summary.add_run(handle_hebrew_text(goal_data['hebrew_summary']))
+                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        
+                        goal_printed = True
+                    
+                    # Create status heading and table
+                    status_heading = doc.add_heading(f"Status: {status}", level=3)                  
+                    doc.add_paragraph()
                     table = doc.add_table(rows=1, cols=2)
                     table.style = 'Table Grid'
                     table.autofit = False
@@ -139,8 +230,14 @@ def create_word_document(structured_data, output_file_path):
                     
                     for initiative_key, initiative_data in initiatives.items():
                         row_cells = table.add_row().cells
-                        initiative_title = f"{initiative_data['summary']} ({initiative_key})"
-                        add_hyperlink(row_cells[0].paragraphs[0].add_run(), f"https://omnisys.atlassian.net/browse/{initiative_key}", initiative_title)
+                        row_cells[0].paragraphs[0].add_run(f"{initiative_data['summary']} (")
+                        add_hyperlink(row_cells[0].paragraphs[0].add_run(), f"https://omnisys.atlassian.net/browse/{initiative_key}", initiative_key)
+                        row_cells[0].paragraphs[0].add_run(")")
+                        
+                        # Add Hebrew summary for initiative
+                        hebrew_summary = row_cells[0].add_paragraph()
+                        hebrew_summary.add_run(handle_hebrew_text(initiative_data['hebrew_summary']))
+                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                         
                         description = initiative_data['description']
                         row_cells[1].text = description
@@ -149,20 +246,35 @@ def create_word_document(structured_data, output_file_path):
                             row_cells[1].add_paragraph("\n\n\n")  # Add 3 lines of separation
                             p = row_cells[1].add_paragraph("Linked initiatives:")
                             for lead_key, lead_data in initiative_data['leads'].items():
-                                lead_title = f"{lead_data['summary']} ({lead_key})"
                                 p = row_cells[1].add_paragraph("- ")
-                                add_hyperlink(p.add_run(lead_title), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_title)
+                                p.add_run(f"{lead_data['summary']} (")
+                                add_hyperlink(p.add_run(), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_key)
+                                p.add_run(")")
                     
-                    doc.add_paragraph()  # Add some space after each table
+                    doc.add_paragraph()
+
+    try:
+        doc.save(output_file_path)
+    except PermissionError:
+        print(f"Error: Unable to save '{output_file_path}'. Please close the file if it's open and try again.")
+        word = win32com.client.Dispatch('Word.Application')
+        word.Documents.Open(output_file_path)
+        word.ActiveDocument.Close()
+        doc.save(output_file_path)
+        word.Quit()
+        del word
+        return True
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
     
-    doc.save(output_file_path)
+    return True
 
 def add_hyperlink(run, url, text):
     """
     A function that places a hyperlink within a paragraph object.
     """
     r = run
-    r.font.color.rgb = RGBColor(0, 0, 255)
     r.font.underline = True
     
     # This gets access to the document.xml.rels file and gets a new relation id value
@@ -196,14 +308,15 @@ def handle_hebrew_text(text):
     Output:
     - processed_text: str, text properly formatted for display
     """
-    pass
+    # Reverse the text for proper right-to-left display
+    return text[::-1]
 
 def main():
     """
     Main function to orchestrate the entire process.
     """
     # Find the Excel file matching the pattern
-    excel_files = [f for f in os.listdir() if re.match(r"Roadmap.*\.xls", f)]
+    excel_files = [f for f in os.listdir() if re.match(r"Roadmap.*\.xlsx", f)]
     
     if not excel_files:
         print("No matching Excel file found.")
@@ -228,6 +341,9 @@ def main():
         print(f"Row {i}: {row}")
     print("...")  # Indicate there might be more rows
 
+    # Add a toggle for including 'To Do' status
+    include_todo = True  # Set this to True if you want to include 'To Do' status
+
     # Process the data
     structured_data = process_data(data)
     
@@ -249,6 +365,7 @@ def main():
                     print(f"          Initiative: {initiative_key}")
                     print(f"            Summary: {initiative_data['summary']}")
                     print(f"            Hebrew Summary: {initiative_data['hebrew_summary'][::-1]}")
+                    print(f"            Description: {initiative_data['description']}")
                     print("            Leads:")
                     for lead_key, lead_data in list(initiative_data['leads'].items())[:1]:
                         print(f"              Lead: {lead_key}")
@@ -256,9 +373,25 @@ def main():
                         print(f"                Hebrew Summary: {lead_data['hebrew_summary'][::-1]}")
     print("...")  # Indicate there might be more data
     # Create Word document
-    output_file_path = "Roadmap Status Report.docx"
-    create_word_document(structured_data, output_file_path)
-    print(f"\nWord document created: {output_file_path}")
+    output_file_name = "Roadmap Status Report.docx"
+    output_file_path = os.path.abspath(output_file_name)
+    if create_word_document(structured_data, output_file_path, include_todo):
+        print(f"\nWord document created: {output_file_path}")
+
+        print(f"File path: {output_file_path}")
+        print(f"File exists: {os.path.exists(output_file_path)}")
+
+        try:
+            word = win32com.client.Dispatch("Word.Application")
+            word.Visible = True
+            doc = word.Documents.Open(output_file_path)
+            print("Word document opened successfully")
+        except Exception as e:
+            print(f"Error opening Word document: {e}")
+
+        time.sleep(5)  # Keep the script running for 5 seconds
+    else:
+        print("\nFailed to create Word document. Please check the error message above.")
 
 if __name__ == "__main__":
     main()
