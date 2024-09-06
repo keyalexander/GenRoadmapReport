@@ -190,6 +190,7 @@ def create_word_document(structured_data, output_file_path, include_todo=False):
                     initiatives = goal_data['statuses'][status]
                     
                     if not theme_printed:
+                        doc.add_page_break()
                         heading = doc.add_heading(level=1)
                         heading.add_run(f"{theme_data['summary']} (")
                         add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{theme_key}", theme_key)
@@ -197,9 +198,8 @@ def create_word_document(structured_data, output_file_path, include_todo=False):
                         
                         # Add Hebrew summary for theme
                         hebrew_summary = doc.add_paragraph()
-                        hebrew_summary.add_run(handle_hebrew_text(theme_data['hebrew_summary']))
-                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        
+                        hebrew_summary.add_run(theme_data['hebrew_summary'])  # Correct, no change needed
+                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT  # Align right for Hebrew text
                         theme_printed = True
                     
                     if not goal_printed:
@@ -210,7 +210,7 @@ def create_word_document(structured_data, output_file_path, include_todo=False):
                         
                         # Add Hebrew summary for goal
                         hebrew_summary = doc.add_paragraph()
-                        hebrew_summary.add_run(handle_hebrew_text(goal_data['hebrew_summary']))
+                        hebrew_summary.add_run(goal_data['hebrew_summary'])
                         hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                         
                         goal_printed = True
@@ -236,7 +236,7 @@ def create_word_document(structured_data, output_file_path, include_todo=False):
                         
                         # Add Hebrew summary for initiative
                         hebrew_summary = row_cells[0].add_paragraph()
-                        hebrew_summary.add_run(handle_hebrew_text(initiative_data['hebrew_summary']))
+                        hebrew_summary.add_run(initiative_data['hebrew_summary'])
                         hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                         
                         description = initiative_data['description']
@@ -308,7 +308,6 @@ def handle_hebrew_text(text):
     Output:
     - processed_text: str, text properly formatted for display
     """
-    # Reverse the text for proper right-to-left display
     return text[::-1]
 
 def main():
