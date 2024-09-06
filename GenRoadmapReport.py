@@ -120,139 +120,154 @@ def process_data(data):
 
 def create_word_document(structured_data, output_file_path, include_todo=False):
     doc = Document()
-    
+    setup_document(doc)
+    add_content(doc, structured_data, include_todo)
+    save_document(doc, output_file_path)
+    return True
+
+def setup_document(doc):
     # Set page orientation to landscape
     section = doc.sections[0]
+    section.orientation = WD_ORIENTATION.PORTRAIT
     new_width, new_height = section.page_height, section.page_width
-    section.orientation = WD_ORIENTATION.LANDSCAPE
     section.page_width = new_width
     section.page_height = new_height
     
-    # Update existing heading styles
+    # Update heading styles
     styles = doc.styles
+    for style_name, size, indent in [('Heading 1', 22, 0), ('Heading 2', 20, 1), ('Heading 3', 18, 0)]:
+        style = styles[style_name]
+        style.font.size = Pt(size)
+        style.paragraph_format.left_indent = Cm(indent)
     
-    # Heading 1 style
-    style_h1 = styles['Heading 1']
-    style_h1.font.size = Pt(22)
-    style_h1.paragraph_format.left_indent = Cm(0)
-    
-    # Heading 2 style
-    style_h2 = styles['Heading 2']
-    style_h2.font.size = Pt(20)
-    style_h2.paragraph_format.left_indent = Cm(1)
-    
-    # Heading 3 style
-    style_h3 = styles['Heading 3']
-    style_h3.font.size = Pt(18)
-    style_h3.paragraph_format.left_indent = Cm(0)
-    
+    # add TOC using add_toc_field
+    add_toc_field(doc)  
+
+
+def add_toc_field(doc):
     # Add title
     doc.add_heading("Roadmap Status Report", level=0)
     
-    # Add table of contents
+    # Add Table of Contents heading
     doc.add_paragraph("Table of Contents", style='TOC Heading')
-     # Add the table of contents
     paragraph = doc.add_paragraph()
     run = paragraph.add_run()
-    fldChar = OxmlElement('w:fldChar')
-    fldChar.set(qn('w:fldCharType'), 'begin')
-    instrText = OxmlElement('w:instrText')
-    instrText.set(qn('xml:space'), 'preserve')
-    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
-    fldChar2 = OxmlElement('w:fldChar')
-    fldChar2.set(qn('w:fldCharType'), 'separate')
-    fldChar3 = OxmlElement('w:t')
-    fldChar3.text = "Right-click to update field."
-    fldChar4 = OxmlElement('w:fldChar')
-    fldChar4.set(qn('w:fldCharType'), 'end')
+    fld_char = OxmlElement('w:fldChar')
+    fld_char.set(qn('w:fldCharType'), 'begin')
+    
+    instr_text = OxmlElement('w:instrText')
+    instr_text.text = 'TOC \\o "1-3" \\h \\z \\u'
+    
+    fld_char2 = OxmlElement('w:fldChar')
+    fld_char2.set(qn('w:fldCharType'), 'separate')
+    
+    fld_char3 = OxmlElement('w:fldChar')
+    fld_char3.set(qn('w:fldCharType'), 'end')
+    
+    run._r.append(fld_char)
+    run._r.append(instr_text)
+    run._r.append(fld_char2)
+    run._r.append(fld_char3)
+    
+    # Add reminder to update TOC
+    reminder = doc.add_paragraph()
+    reminder_run = reminder.add_run("Right-click and select 'Update Field' to update the Table of Contents.")
+    reminder_run.font.italic = True
+    reminder_run.font.size = Pt(9)  # Set font size to 9 points
+    reminder_run.font.color.rgb = RGBColor(128, 128, 128)  # Set font color to gray
+   
+    
 
-    r_element = run._r
-    r_element.append(fldChar)
-    r_element.append(instrText)
-    r_element.append(fldChar2)
-    r_element.append(fldChar3)
-    r_element.append(fldChar4)
-    doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-
-    # Define the order of statuses
+def add_content(doc, structured_data, include_todo):
     status_order = ['Done', 'In progress', 'Next']
     if include_todo:
         status_order.append('To Do')
 
     for theme_key, theme_data in structured_data.items():
         theme_printed = False
-        
         for goal_key, goal_data in theme_data['goals'].items():
             goal_printed = False
-            
             for status in status_order:
                 if status in goal_data['statuses'] and goal_data['statuses'][status]:
-                    initiatives = goal_data['statuses'][status]
-                    
-                    if not theme_printed:
-                        doc.add_page_break()
-                        heading = doc.add_heading(level=1)
-                        heading.add_run(f"{theme_data['summary']} (")
-                        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{theme_key}", theme_key)
-                        heading.add_run(")")
-                        
-                        # Add Hebrew summary for theme
-                        hebrew_summary = doc.add_paragraph()
-                        hebrew_summary.add_run(theme_data['hebrew_summary'])  # Correct, no change needed
-                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT  # Align right for Hebrew text
-                        theme_printed = True
-                    
-                    if not goal_printed:
-                        heading = doc.add_heading(level=2)
-                        heading.add_run(f"{goal_data['summary']} (")
-                        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{goal_key}", goal_key)
-                        heading.add_run(")")
-                        
-                        # Add Hebrew summary for goal
-                        hebrew_summary = doc.add_paragraph()
-                        hebrew_summary.add_run(goal_data['hebrew_summary'])
-                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        
-                        goal_printed = True
-                    
-                    # Create status heading and table
-                    status_heading = doc.add_heading(f"Status: {status}", level=3)                  
-                    doc.add_paragraph()
-                    table = doc.add_table(rows=1, cols=2)
-                    table.style = 'Table Grid'
-                    table.autofit = False
-                    table.columns[0].width = Cm(5)
-                    table.columns[1].width = Cm(10)
-                    
-                    hdr_cells = table.rows[0].cells
-                    hdr_cells[0].text = 'Title'
-                    hdr_cells[1].text = 'Description'
-                    
-                    for initiative_key, initiative_data in initiatives.items():
-                        row_cells = table.add_row().cells
-                        row_cells[0].paragraphs[0].add_run(f"{initiative_data['summary']} (")
-                        add_hyperlink(row_cells[0].paragraphs[0].add_run(), f"https://omnisys.atlassian.net/browse/{initiative_key}", initiative_key)
-                        row_cells[0].paragraphs[0].add_run(")")
-                        
-                        # Add Hebrew summary for initiative
-                        hebrew_summary = row_cells[0].add_paragraph()
-                        hebrew_summary.add_run(initiative_data['hebrew_summary'])
-                        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        
-                        description = initiative_data['description']
-                        row_cells[1].text = description
+                    theme_printed, goal_printed = add_theme_goal_content(
+                        doc, theme_key, theme_data, goal_key, goal_data, status, theme_printed, goal_printed
+                    )
 
-                        if initiative_data['leads']:
-                            row_cells[1].add_paragraph("\n\n\n")  # Add 3 lines of separation
-                            p = row_cells[1].add_paragraph("Linked initiatives:")
-                            for lead_key, lead_data in initiative_data['leads'].items():
-                                p = row_cells[1].add_paragraph("- ")
-                                p.add_run(f"{lead_data['summary']} (")
-                                add_hyperlink(p.add_run(), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_key)
-                                p.add_run(")")
-                    
-                    doc.add_paragraph()
+def add_theme_goal_content(doc, theme_key, theme_data, goal_key, goal_data, status, theme_printed, goal_printed):
+    if not theme_printed:
+        doc.add_page_break()
+        heading = doc.add_heading(level=1)
+        heading.add_run(f"{theme_data['summary']} (")
+        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{theme_key}", theme_key)
+        heading.add_run(")")
+        
+        hebrew_summary = doc.add_paragraph()
+        hebrew_summary.add_run(theme_data['hebrew_summary'])
+        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        theme_printed = True
+    
+    if not goal_printed:
+        heading = doc.add_heading(level=2)
+        heading.add_run(f"{goal_data['summary']} (")
+        add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{goal_key}", goal_key)
+        heading.add_run(")")
+        
+        hebrew_summary = doc.add_paragraph()
+        hebrew_summary.add_run(goal_data['hebrew_summary'])
+        hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        goal_printed = True
+    
+    add_status_table(doc, status, goal_data['statuses'][status])
+    return theme_printed, goal_printed
 
+def add_status_table(doc, status, initiatives):
+    doc.add_heading(f"Status: {status}", level=3)
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.autofit = False
+    table.columns[0].width = Cm(5)
+    table.columns[1].width = Cm(10)
+    
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'Title'
+    hdr_cells[1].text = 'Description'
+    
+    for initiative_key, initiative_data in initiatives.items():
+        row_cells = table.add_row().cells
+        add_initiative_to_table(row_cells, initiative_key, initiative_data)
+    
+    doc.add_paragraph()
+
+def add_initiative_to_table(row_cells, initiative_key, initiative_data):
+    row_cells[0].paragraphs[0].add_run(f"{initiative_data['summary']} (")
+    add_hyperlink(row_cells[0].paragraphs[0].add_run(), f"https://omnisys.atlassian.net/browse/{initiative_key}", initiative_key)
+    row_cells[0].paragraphs[0].add_run(")")
+    
+    hebrew_summary = row_cells[0].add_paragraph()
+    hebrew_summary.add_run(initiative_data['hebrew_summary'])
+    hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
+    start_date = row_cells[0].add_paragraph()
+    start_date.add_run("Start Date: ")
+    start_date_run = start_date.add_run(f"{initiative_data['start_date'].split()[0] if initiative_data['start_date'] else 'Unknown'}")
+    start_date_run.underline = True
+    
+    end_date = row_cells[0].add_paragraph()
+    end_date.add_run("Due Date: ")
+    end_date_run = end_date.add_run(f"{initiative_data['due_date'].split()[0] if initiative_data['due_date'] else 'Unknown'}")
+    end_date_run.underline = True
+    row_cells[1].text = initiative_data['description']
+
+    if initiative_data['leads']:
+        row_cells[1].add_paragraph("\n\n\n")
+        p = row_cells[1].add_paragraph("Linked initiatives:")
+        for lead_key, lead_data in initiative_data['leads'].items():
+            p = row_cells[1].add_paragraph("- ")
+            p.add_run(f"{lead_data['summary']} (")
+            add_hyperlink(p.add_run(), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_key)
+            p.add_run(")")
+
+def save_document(doc, output_file_path):
     try:
         doc.save(output_file_path)
     except PermissionError:
@@ -263,11 +278,9 @@ def create_word_document(structured_data, output_file_path, include_todo=False):
         doc.save(output_file_path)
         word.Quit()
         del word
-        return True
     except Exception as e:
         print(f"Error: {e}")
         return False
-    
     return True
 
 def add_hyperlink(run, url, text):
@@ -334,43 +347,13 @@ def main():
     # Print statement to confirm successful file reading
     print(f"Successfully read {len(data)} rows from {file_path}")
 
-    # Print a few sample rows
-    print("\nSample rows from the file:")
-    for i, row in enumerate(data[:5], 1):
-        print(f"Row {i}: {row}")
-    print("...")  # Indicate there might be more rows
 
     # Add a toggle for including 'To Do' status
-    include_todo = True  # Set this to True if you want to include 'To Do' status
+    include_todo = False  # Set this to True if you want to include 'To Do' status
 
     # Process the data
     structured_data = process_data(data)
     
-    # Print a sample of the structured data to verify
-    print("\nSample of structured data:")
-    for theme_key, theme_data in list(structured_data.items())[:1]:
-        print(f"Theme: {theme_key}")
-        print(f"  Summary: {theme_data['summary']}")
-        print(f"  Hebrew Summary: {theme_data['hebrew_summary'][::-1]}")
-        print("  Goals:")
-        for goal_key, goal_data in list(theme_data['goals'].items())[:1]:
-            print(f"    Goal: {goal_key}")
-            print(f"      Summary: {goal_data['summary']}")
-            print(f"      Hebrew Summary: {goal_data['hebrew_summary'][::-1]}")
-            print("      Statuses:")
-            for status, initiatives in list(goal_data['statuses'].items())[:1]:
-                print(f"        Status: {status}")
-                for initiative_key, initiative_data in list(initiatives.items())[:1]:
-                    print(f"          Initiative: {initiative_key}")
-                    print(f"            Summary: {initiative_data['summary']}")
-                    print(f"            Hebrew Summary: {initiative_data['hebrew_summary'][::-1]}")
-                    print(f"            Description: {initiative_data['description']}")
-                    print("            Leads:")
-                    for lead_key, lead_data in list(initiative_data['leads'].items())[:1]:
-                        print(f"              Lead: {lead_key}")
-                        print(f"                Summary: {lead_data['summary']}")
-                        print(f"                Hebrew Summary: {lead_data['hebrew_summary'][::-1]}")
-    print("...")  # Indicate there might be more data
     # Create Word document
     output_file_name = "Roadmap Status Report.docx"
     output_file_path = os.path.abspath(output_file_name)
