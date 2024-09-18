@@ -179,7 +179,7 @@ def add_toc_field(doc):
     
 
 def add_content(doc, structured_data, include_todo):
-    status_order = ['Done', 'In progress', 'Next']
+    status_order = ['Done', 'In Progress', 'Next']
     if include_todo:
         status_order.append('To Do')
 
@@ -195,7 +195,6 @@ def add_content(doc, structured_data, include_todo):
 
 def add_theme_goal_content(doc, theme_key, theme_data, goal_key, goal_data, status, theme_printed, goal_printed):
     if not theme_printed:
-        doc.add_page_break()
         heading = doc.add_heading(level=1)
         heading.add_run(f"{theme_data['summary']} (")
         add_hyperlink(heading.add_run(), f"https://omnisys.atlassian.net/browse/{theme_key}", theme_key)
@@ -239,33 +238,50 @@ def add_status_table(doc, status, initiatives):
     doc.add_paragraph()
 
 def add_initiative_to_table(row_cells, initiative_key, initiative_data):
-    row_cells[0].paragraphs[0].add_run(f"{initiative_data['summary']} (")
+    # Set font size for all text in the table cells
+    for cell in row_cells:
+        cell.paragraphs[0].style.font.size = Pt(12)
+
+    # Add initiative summary and key
+    summary_run = row_cells[0].paragraphs[0].add_run(f"{initiative_data['summary']} (")
     add_hyperlink(row_cells[0].paragraphs[0].add_run(), f"https://omnisys.atlassian.net/browse/{initiative_key}", initiative_key)
     row_cells[0].paragraphs[0].add_run(")")
-    
+
+    # Add Hebrew summary
     hebrew_summary = row_cells[0].add_paragraph()
     hebrew_summary.add_run(initiative_data['hebrew_summary'])
     hebrew_summary.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    
+    hebrew_summary.paragraph_format.bidi = True  # Enable bidirectional text
+    hebrew_summary.style.font.size = Pt(12)
+
+    # Add start date
     start_date = row_cells[0].add_paragraph()
     start_date.add_run("Start Date: ")
     start_date_run = start_date.add_run(f"{initiative_data['start_date'].split()[0] if initiative_data['start_date'] else 'Unknown'}")
     start_date_run.underline = True
-    
+    start_date.style.font.size = Pt(12)
+
+    # Add end date
     end_date = row_cells[0].add_paragraph()
     end_date.add_run("Due Date: ")
     end_date_run = end_date.add_run(f"{initiative_data['due_date'].split()[0] if initiative_data['due_date'] else 'Unknown'}")
     end_date_run.underline = True
-    row_cells[1].text = initiative_data['description']
+    end_date.style.font.size = Pt(12)
 
+    # Add description
+    row_cells[1].text = initiative_data['description']
+    row_cells[1].paragraphs[0].style.font.size = Pt(12)
+
+    # Add linked initiatives
     if initiative_data['leads']:
-        row_cells[1].add_paragraph("\n\n\n")
-        p = row_cells[1].add_paragraph("Linked initiatives:")
+        linked_initiatives = row_cells[1].add_paragraph("\n\nLinked initiatives:")
+        linked_initiatives.style.font.size = Pt(12)
         for lead_key, lead_data in initiative_data['leads'].items():
             p = row_cells[1].add_paragraph("- ")
             p.add_run(f"{lead_data['summary']} (")
             add_hyperlink(p.add_run(), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_key)
             p.add_run(")")
+            p.style.font.size = Pt(12)
 
 def save_document(doc, output_file_path):
     try:
@@ -323,6 +339,19 @@ def handle_hebrew_text(text):
     """
     return text[::-1]
 
+def update_toc(doc_path):
+    try:
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(doc_path)
+        doc.TablesOfContents(1).Update()
+        doc.Save()
+        doc.Close()
+        word.Quit()
+        print("Table of Contents updated successfully")
+    except Exception as e:
+        print(f"Error updating Table of Contents: {e}")
+
 def main():
     """
     Main function to orchestrate the entire process.
@@ -362,6 +391,9 @@ def main():
 
         print(f"File path: {output_file_path}")
         print(f"File exists: {os.path.exists(output_file_path)}")
+
+        # Update the Table of Contents
+        update_toc(output_file_path)
 
         try:
             word = win32com.client.Dispatch("Word.Application")
