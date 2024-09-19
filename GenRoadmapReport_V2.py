@@ -11,6 +11,22 @@ from docx.enum.section import WD_ORIENTATION
 from docx.oxml import OxmlElement
 import win32com.client
 import logging
+from datetime import datetime
+import getpass  
+
+def format_date(date_str):
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        formatted_date = date_obj.strftime("%d %b %Y")
+    except ValueError:
+        formatted_date = date_str  # Return the original if parsing fails
+    return formatted_date
+
+def format_hebrew_text(text):
+    """
+    Formats Hebrew text with RTL control characters.
+    """
+    return '\u202B' + text + '\u202C'
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -126,20 +142,57 @@ def process_data(data):
 
     return structured_data
 
-def create_word_document(structured_data, output_file_path, include_todo=False):
+def create_word_document(structured_data, output_file_path, date_time_str, include_todo=False):
     """
     Creates a Word document from the structured data.
     """
     doc = Document()
-    setup_document(doc)
+    setup_document(doc, date_time_str)
     add_content(doc, structured_data, include_todo)
     success = save_document(doc, output_file_path)
     return success
 
-def setup_document(doc):
+def add_headers_and_footers(doc):
+    section = doc.sections[0]
+    header = section.header
+    footer = section.footer
+
+    # Add header content
+    header_paragraph = header.paragraphs[0]
+    header_paragraph.text = "Roadmap Status Report"
+    header_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Add footer content with page number
+    footer_paragraph = footer.paragraphs[0]
+    footer_paragraph.text = "Page "
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Add page number field
+    page_number_run = footer_paragraph.add_run()
+    fld_char = OxmlElement('w:fldChar')
+    fld_char.set(qn('w:fldCharType'), 'begin')
+
+    instr_text = OxmlElement('w:instrText')
+    instr_text.text = 'PAGE'
+
+    fld_char_end = OxmlElement('w:fldChar')
+    fld_char_end.set(qn('w:fldCharType'), 'end')
+
+    page_number_run._r.extend([fld_char, instr_text, fld_char_end])
+
+def add_cover_page(doc, date_time_str):
+    doc.add_heading("Roadmap Status Report", 0)
+    doc.add_paragraph()
+    doc.add_paragraph(f"Date: {date_time_str}")
+    doc.add_paragraph(f"Prepared by: {getpass.getuser()}")
+    doc.add_page_break()
+
+def setup_document(doc, date_time_str):
     """
     Sets up the document layout and styles.
     """
+    add_cover_page(doc, date_time_str)
+
     section = doc.sections[0]
     section.orientation = WD_ORIENTATION.PORTRAIT
     new_width, new_height = section.page_height, section.page_width
@@ -147,17 +200,28 @@ def setup_document(doc):
     section.page_height = new_height
 
     styles = doc.styles
-    heading_styles = [
-        ('Heading 1', 22, 0),
-        ('Heading 2', 20, 1),
-        ('Heading 3', 18, 0)
+
+    # Define numbering styles
+    numbering_styles = [
+        ('Heading 1', '1', 22, 0),
+        ('Heading 2', '1.1', 20, 1),
+        ('Heading 3', '1.1.1', 18, 1.5)
     ]
-    for style_name, size, indent in heading_styles:
+
+    for style_name, numbering_format, size, indent in numbering_styles:
         style = styles[style_name]
         style.font.size = Pt(size)
         style.paragraph_format.left_indent = Cm(indent)
+        style.paragraph_format.space_after = Pt(6)
+        # Apply numbering
+        style.paragraph_format.numbering_style = numbering_format
+    
+    # Update Normal style for paragraphs
+    normal_style = doc.styles['Normal']
+    normal_style.paragraph_format.space_after = Pt(6)
 
     add_toc_field(doc)
+    add_headers_and_footers(doc)
 
 def add_toc_field(doc):
     """
@@ -209,7 +273,7 @@ def add_theme_goal_content(doc, theme_key, theme_data, goal_key, goal_data, stat
         heading.add_run(")")
 
         # Add Hebrew summary with RTL control characters
-        hebrew_text = '\u202B' + theme_data['hebrew_summary'] + '\u202C'
+        hebrew_text = format_hebrew_text(theme_data['hebrew_summary'])
         hebrew_summary = doc.add_paragraph()
         hebrew_run = hebrew_summary.add_run(hebrew_text)
         hebrew_run.font.size = Pt(12)
@@ -224,7 +288,7 @@ def add_theme_goal_content(doc, theme_key, theme_data, goal_key, goal_data, stat
         heading.add_run(")")
 
         # Add Hebrew summary with RTL control characters
-        hebrew_text = '\u202B' + goal_data['hebrew_summary'] + '\u202C'
+        hebrew_text = format_hebrew_text(goal_data['hebrew_summary'])
         hebrew_summary = doc.add_paragraph()
         hebrew_run = hebrew_summary.add_run(hebrew_text)
         hebrew_run.font.size = Pt(12)
@@ -239,10 +303,21 @@ def add_status_table(doc, status, initiatives):
     """
     Adds a table for the status and its initiatives to the document.
     """
-    doc.add_heading(f"Status: {status}", level=3)
+    status_colors = {
+        'Done': RGBColor(0, 128, 0),          # Green
+        'In Progress': RGBColor(0, 0, 255),   # Blue
+        'Next': RGBColor(255, 165, 0),        # Orange
+        'To Do': RGBColor(128, 128, 128)      # Grey
+    }
+
+    status_heading = doc.add_heading(level=3)
+    status_run = status_heading.add_run(f"Status: {status}")
+    if status in status_colors:
+        status_run.font.color.rgb = status_colors[status]
+
     table = doc.add_table(rows=1, cols=2)
-    table.style = 'Table Grid'
-    table.autofit = False
+    table.style = 'Light Shading Accent 1'  # Use a built-in style
+    table.autofit = True
     table.columns[0].width = Cm(5)
     table.columns[1].width = Cm(10)
 
@@ -255,6 +330,13 @@ def add_status_table(doc, status, initiatives):
         add_initiative_to_table(row_cells, initiative_key, initiative_data)
 
     doc.add_paragraph()
+    # Adjust cell margins
+    for row in table.rows:
+        for cell in row.cells:
+            cell.margin_top = Cm(0.1)
+            cell.margin_bottom = Cm(0.1)
+            cell.margin_left = Cm(0.1)
+            cell.margin_right = Cm(0.1)
 
 def add_initiative_to_table(row_cells, initiative_key, initiative_data):
     for cell in row_cells:
@@ -269,7 +351,7 @@ def add_initiative_to_table(row_cells, initiative_key, initiative_data):
     summary_paragraph.add_run(")")
 
     # Add Hebrew summary with RTL control characters
-    hebrew_text = '\u202B' + initiative_data['hebrew_summary'] + '\u202C'
+    hebrew_text = format_hebrew_text(initiative_data['hebrew_summary'])
     hebrew_summary = row_cells[0].add_paragraph()
     hebrew_run = hebrew_summary.add_run(hebrew_text)
     hebrew_run.font.size = Pt(12)
@@ -277,15 +359,15 @@ def add_initiative_to_table(row_cells, initiative_key, initiative_data):
     hebrew_summary.paragraph_format.bidi = True
 
     # Add start date and due date
-    start_date = initiative_data['start_date'].split()[0] if initiative_data['start_date'] else 'Unknown'
-    due_date = initiative_data['due_date'].split()[0] if initiative_data['due_date'] else 'Unknown'
+    start_date = format_date(initiative_data['start_date']) if initiative_data['start_date'] else 'Unknown'
+    due_date = format_date(initiative_data['due_date']) if initiative_data['due_date'] else 'Unknown'
     dates_paragraph = row_cells[0].add_paragraph()
     dates_paragraph.add_run(f"Start Date: {start_date}\nDue Date: {due_date}")
     dates_paragraph.style.font.size = Pt(12)
 
     # Add description
     description_paragraph = row_cells[1].paragraphs[0]
-    description_paragraph.text = initiative_data['description']
+    description_paragraph.text = format_hebrew_text(initiative_data['description'])
     description_paragraph.style.font.size = Pt(12)
 
     # Add linked initiatives
@@ -294,7 +376,7 @@ def add_initiative_to_table(row_cells, initiative_key, initiative_data):
         linked_initiatives.style.font.size = Pt(12)
         for lead_key, lead_data in initiative_data['leads'].items():
             p = row_cells[1].add_paragraph("- ")
-            p.add_run(f"{lead_data['summary']} (")
+            p.add_run(f"{format_hebrew_text(lead_data['summary'])} (")
             add_hyperlink(p.add_run(), f"https://omnisys.atlassian.net/browse/{lead_key}", lead_key)
             p.add_run(")")
             p.style.font.size = Pt(12)
@@ -329,11 +411,30 @@ def update_toc(doc_path):
     except Exception as e:
         logging.error(f"Error updating Table of Contents: {e}")
 
+def convert_docx_to_pdf(docx_path, pdf_path):
+    """
+    Converts a Word document to a PDF file.
+    """
+    try:
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(docx_path)
+        doc.SaveAs(pdf_path, FileFormat=17)  # 17 is the code for PDF format    
+        doc.Close()
+        word.Quit()
+        logging.info(f"Word document converted to PDF: '{pdf_path}'")
+    except Exception as e:
+        logging.error(f"Error converting Word document to PDF: {e}")
+    
+
 def main():
     """
     Main function to generate the roadmap report.
     """
-    excel_files = [f for f in os.listdir() if re.match(r"Roadmap.*\.xlsx", f)]
+    excel_files = [f for f in os.listdir() if re.match(r"Roadmap_\d{6}_\d{4}\.xlsx", f)]
+    if excel_files:
+        file_name = excel_files[0]
+        date_time_str = re.search(r"Roadmap_(\d{6}_\d{4})\.xlsx", file_name).group(1)
     if not excel_files:
         logging.error("No matching Excel file found.")
         return
@@ -347,12 +448,14 @@ def main():
     logging.info(f"Successfully read {len(data)} rows from '{file_path}'")
     include_todo = False  # Set this to True if you want to include 'To Do' status
     structured_data = process_data(data)
-    output_file_name = "Roadmap Status Report.docx"
-    output_file_path = os.path.abspath(output_file_name)
-    success = create_word_document(structured_data, output_file_path, include_todo)
+    output_file_name = f"Roadmap_Status_Report_{date_time_str}.docx"
+    output_file_path_docx = os.path.join(os.path.dirname(__file__), output_file_name)
+    output_file_path_pdf = os.path.join(r"C:\Users\alexkn\Omnisys LTD\Omnisys LTD Team Site - מסמכי ניהול מוצר\platform", f"Roadmap_Status_Report_{date_time_str}.pdf")
+    success = create_word_document(structured_data, output_file_path_docx, date_time_str, include_todo)
     if success:
-        logging.info(f"\nWord document created: '{output_file_path}'")
-        update_toc(output_file_path)
+        logging.info(f"\nWord document created: '{output_file_path_docx}'")
+        update_toc(output_file_path_docx)
+        convert_docx_to_pdf(output_file_path_docx, output_file_path_pdf)
     else:
         logging.error("\nFailed to create Word document. Please check the error messages above.")
 
