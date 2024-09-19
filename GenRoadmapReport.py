@@ -13,6 +13,8 @@ import win32com.client
 import logging
 from datetime import datetime
 import getpass  
+import pandas as pd
+import logging
 
 def format_date(date_str):
     try:
@@ -46,12 +48,28 @@ def add_hyperlink(run, url, text):
     hyperlink.append(new_run)
     run._r.append(hyperlink)
 
+
+
+
 def read_excel_file(file_path):
     """
     Reads the Excel file containing Jira issues and returns a list of dictionaries.
     """
     try:
-        df = pd.read_excel(file_path)
+        if file_path.endswith('.xls'):
+            xls_file_path = os.path.abspath(file_path)
+            xlsx_file_path = xls_file_path + 'x'
+            
+            # Read the .xls file using pandas
+            df = pd.read_excel(xls_file_path, engine='xlrd')
+            
+            # Save it as .xlsx using openpyxl
+            df.to_excel(xlsx_file_path, index=False, engine='openpyxl')
+            
+            file_path = xlsx_file_path
+        
+        # Read the .xlsx file
+        df = pd.read_excel(file_path, engine='openpyxl')
         df = df.fillna('').astype(str)
         data = df.to_dict('records')
         return data
@@ -431,33 +449,36 @@ def main():
     """
     Main function to generate the roadmap report.
     """
-    excel_files = [f for f in os.listdir() if re.match(r"Roadmap_\d{6}_\d{4}\.xlsx", f)]
-    if excel_files:
-        file_name = excel_files[0]
-        date_time_str = re.search(r"Roadmap_(\d{6}_\d{4})\.xlsx", file_name).group(1)
-    if not excel_files:
-        logging.error("No matching Excel file found.")
+    from tkinter import Tk
+    from tkinter.filedialog import askopenfilename
+
+    Tk().withdraw()  # We don't want a full GUI, so keep the root window from appearing
+    file_path = askopenfilename(filetypes=[("Excel files", "*.xlsx, *.xls")], title="Select the Excel file")
+
+    if not file_path:
+        logging.error("No file selected.")
         return
 
-    file_path = excel_files[0]
+    date_time_str = re.search(r"Roadmap_(\d{6}_\d{4})\.", os.path.basename(file_path)).group(1)
     data = read_excel_file(file_path)
     if not data:
         logging.error("No data read from the Excel file.")
         return
 
     logging.info(f"Successfully read {len(data)} rows from '{file_path}'")
-    include_todo = False  # Set this to True if you want to include 'To Do' status
-    structured_data = process_data(data)
-    output_file_name = f"Roadmap_Status_Report_{date_time_str}.docx"
-    output_file_path_docx = os.path.join(os.path.dirname(__file__), output_file_name)
-    output_file_path_pdf = os.path.join(r"C:\Users\alexkn\Omnisys LTD\Omnisys LTD Team Site - מסמכי ניהול מוצר\platform", f"Roadmap_Status_Report_{date_time_str}.pdf")
-    success = create_word_document(structured_data, output_file_path_docx, date_time_str, include_todo)
-    if success:
-        logging.info(f"\nWord document created: '{output_file_path_docx}'")
-        update_toc(output_file_path_docx)
-        convert_docx_to_pdf(output_file_path_docx, output_file_path_pdf)
-    else:
-        logging.error("\nFailed to create Word document. Please check the error messages above.")
+    for include_todo in [False, True]:
+        structured_data = process_data(data)
+        suffix = "_extended" if include_todo else ""
+        output_file_name = f"Roadmap_Status_Report_{date_time_str}{suffix}.docx"
+        output_file_path_docx = os.path.join(os.path.dirname(__file__), output_file_name)
+        output_file_path_pdf = os.path.join(r"C:\Users\alexkn\Omnisys LTD\Omnisys LTD Team Site - מסמכי ניהול מוצר\Roadmap Reports", f"Roadmap_Status_Report_{date_time_str}{suffix}.pdf")
+        success = create_word_document(structured_data, output_file_path_docx, date_time_str, include_todo)
+        if success:
+            logging.info(f"\nWord document created: '{output_file_path_docx}'")
+            update_toc(output_file_path_docx)
+            convert_docx_to_pdf(output_file_path_docx, output_file_path_pdf)
+        else:
+            logging.error("\nFailed to create Word document. Please check the error messages above.")
 
 if __name__ == "__main__":
     main()
