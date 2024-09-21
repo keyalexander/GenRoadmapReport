@@ -1,4 +1,5 @@
 *.docx
+!template.docx
 *.pdf
 *.xlsx
 *.xls

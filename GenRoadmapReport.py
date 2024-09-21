@@ -15,6 +15,7 @@ from datetime import datetime
 import getpass  
 import pandas as pd
 import logging
+from docx.enum.style import WD_STYLE_TYPE
 
 def format_date(date_str):
     try:
@@ -164,7 +165,8 @@ def create_word_document(structured_data, output_file_path, date_time_str, inclu
     """
     Creates a Word document from the structured data.
     """
-    doc = Document()
+    # Load the template document
+    doc = Document('template.docx')
     setup_document(doc, date_time_str)
     add_content(doc, structured_data, include_todo)
     success = save_document(doc, output_file_path)
@@ -219,21 +221,6 @@ def setup_document(doc, date_time_str):
 
     styles = doc.styles
 
-    # Define numbering styles
-    numbering_styles = [
-        ('Heading 1', '1', 22, 0),
-        ('Heading 2', '1.1', 20, 1),
-        ('Heading 3', '1.1.1', 18, 1.5)
-    ]
-
-    for style_name, numbering_format, size, indent in numbering_styles:
-        style = styles[style_name]
-        style.font.size = Pt(size)
-        style.paragraph_format.left_indent = Cm(indent)
-        style.paragraph_format.space_after = Pt(6)
-        # Apply numbering
-        style.paragraph_format.numbering_style = numbering_format
-    
     # Update Normal style for paragraphs
     normal_style = doc.styles['Normal']
     normal_style.paragraph_format.space_after = Pt(6)
